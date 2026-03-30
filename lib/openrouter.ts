@@ -4,7 +4,7 @@ import OpenAI from "openai";
 
 export const MODELS = {
   // One researcher per lane — Gemini 2.5 Flash (fast, large context, no free-tier rate limits)
-  researcher: "google/gemini-2.5-flash-preview-05-20",
+  researcher: "google/gemini-2.5-flash",
 
   // Analyst + synthesis — DeepSeek V3 (strong reasoning, fast streaming)
   analyst:  "deepseek/deepseek-chat",
