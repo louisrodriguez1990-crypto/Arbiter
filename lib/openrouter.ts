@@ -6,13 +6,13 @@ export const MODELS = {
   // Primary analyst — DeepSeek V3.1 hybrid reasoning model
   analyst: "deepseek/deepseek-chat-v3.1",
 
-  // Research swarm — free tier models, one per researcher slot
-  researcherA: "meta-llama/llama-3.3-70b-instruct:free",
-  researcherB: "mistralai/mistral-small-3.1-24b-instruct:free",
-  researcherC: "google/gemini-2.5-pro-exp-03-25:free",
+  // Research swarm — StepFun Step-3.5 Flash (free, 256K context)
+  researcherA: "stepfun/step-3.5-flash:free",
+  researcherB: "stepfun/step-3.5-flash:free",
+  researcherC: "stepfun/step-3.5-flash:free",
 
-  // Utility (decompose + synthesis) — use the strongest free model
-  utility: "meta-llama/llama-3.3-70b-instruct:free",
+  // Utility (decompose + synthesis)
+  utility: "stepfun/step-3.5-flash:free",
 } as const;
 
 // Per-swarm researcher assignment — each swarm gets the same three models
