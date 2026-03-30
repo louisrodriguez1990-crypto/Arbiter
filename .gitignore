@@ -9,5 +9,8 @@ node_modules/
 .env.local
 .env*.local
 
+# TypeScript
+tsconfig.tsbuildinfo
+
 # OS
 .DS_Store
