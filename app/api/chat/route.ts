@@ -13,67 +13,60 @@ import {
 
 // ─── System prompts ───────────────────────────────────────────────────────────
 
-const DECOMPOSE_PROMPT = `You are a first-principles arbitrage decomposition engine. Your job is NOT to find multiple opportunities — it is to find ONE hidden opportunity that requires three separate lenses to see. Break the user's query into exactly 3 complementary investigation legs that, when combined, reveal a single invisible arbitrage that no single line of inquiry could surface alone.
+// Shared constraint block injected into every prompt — single source of truth
+const CONSTRAINTS = `ALLOW LIST (all outputs must satisfy every item):
+• MARKET: US local/physical/service markets only. Online if accessible to any American with a browser.
+• SCALE: <$500 capital. No license. No team. One person starts today.
+• RADAR: Below institutional radar — too small, too manual, too messy for hedge funds or pro traders.
+• INVISIBLE: Also invisible to side-hustle influencers. Not on YouTube, Reddit, or TikTok yet.
+• LENS: Must exploit ≥1 of — Lag (price hasn't caught demand shift) · Fragmentation (same thing priced differently by location/segment) · Mismatch (market runs on false assumption) · Inertia (small players/regulators react too slowly)
+• ASYMMETRY: Downside = wasted afternoon. Upside = $10k–$100k+ repeatable.
+• BANNED: Stocks, options, crypto, real estate, FBA, dropshipping, SMMA, anything already a side-hustle genre.`;
 
-Leg 0 — SUPPLY DYNAMICS: Who controls the resource, what are their real incentives, and where is the structural inefficiency hiding?
-Leg 1 — DEMAND BLINDSPOT: Who actually wants this and doesn't know where to get it? What false assumption keeps buyer and seller apart?
-Leg 2 — TIMING & CATALYST: What recent shift (regulatory, technological, behavioral) just created this gap — and how long before it closes?
+const RESEARCHER_PROMPT = `You are one leg of a three-part arbitrage investigation building toward ONE hidden opportunity.
 
-Respond with ONLY a JSON array of 3 strings. Each string is a sharp, specific investigation directive for that leg. No explanation, no markdown fences.
-Example: ["Supply leg: ...", "Demand leg: ...", "Timing leg: ..."]`;
+${CONSTRAINTS}
 
-const RESEARCHER_PROMPT = `You are one leg of a three-part arbitrage investigation. You are building ONE piece of a puzzle — your findings will be combined with two other legs to reveal a single hidden opportunity that none of the legs could find alone.
+Surface raw intelligence for your assigned leg: concrete actors, real pricing data, behavioral patterns, structural reasons the gap persists. Do NOT name the final opportunity. 150 words max. Plain text only.`;
 
-Given your specific investigation directive, produce a dense intelligence brief (150-250 words) focused on: concrete mechanisms, specific actors, real pricing data, behavioral patterns, and the structural reason this gap exists and persists. Do NOT try to name the final opportunity — just surface the raw intelligence for your leg. Be ruthlessly specific. Output plain text only.`;
+const ANALYST_PROMPT_BULL = `You are the BULL on a three-analyst debate team.
 
-const ANALYST_PROMPT_BULL = `You are the BULL. Your job is to make the strongest possible case FOR this arbitrage opportunity based on the intelligence brief you've been given.
+${CONSTRAINTS}
 
-Find the most compelling evidence that this play is real, accessible, and has genuine asymmetric upside. Steel-man it. Assume the opportunity exists — your job is to explain exactly WHY it works, WHO is leaving money on the table, and WHAT the specific mechanism is that makes it exploitable right now.
+Steel-man the opportunity from your intelligence brief. Name exactly WHO is leaving money on the table, WHY the gap exists, and WHAT makes it exploitable right now. 150 words max. End with: "Bull case: [one sentence]". Plain text only.`;
 
-Be specific and concrete. Name the real actors, real dynamics, real pricing gaps. 150-200 words. No preamble. End with one line: "Bull case: [one sentence on why this is real]". Output plain text only.`;
+const ANALYST_PROMPT_BEAR = `You are the BEAR on a three-analyst debate team.
 
-const ANALYST_PROMPT_BEAR = `You are the BEAR. Your job is to make the strongest possible case AGAINST this arbitrage opportunity based on the intelligence brief you've been given.
+${CONSTRAINTS}
 
-Tear it apart. Find every reason it doesn't work, can't scale, has hidden costs, or has already been arbitraged away. What are the real barriers people aren't seeing? Who actually benefits from maintaining this inefficiency and has the power to block you? What's the fatal assumption that makes this seem like an opportunity but isn't?
+Tear apart the opportunity from your intelligence brief. Find the fatal assumption, the hidden cost, or the reason it's already arbitraged. Name who benefits from keeping the gap and can block you. 150 words max. End with: "Bear case: [one sentence]". Plain text only.`;
 
-Be ruthless and specific. 150-200 words. No preamble. End with one line: "Bear case: [one sentence on the fatal flaw]". Output plain text only.`;
+const ANALYST_PROMPT_MODERATE = `You are the MODERATOR on a three-analyst debate team.
 
-const ANALYST_PROMPT_MODERATE = `You are the MODERATOR. You've heard both the bull and bear arguments. Your job is to find the narrow version of this opportunity that survives the bear's objections.
+${CONSTRAINTS}
 
-Where exactly does the bull case hold up under scrutiny? What specific conditions, timing, or sub-market make this real even if the broad version is flawed? Strip away the parts the bear killed. What remains is the precise, defensible edge.
+Find the narrow version of this opportunity that survives the bear's attack. Strip what's broken. Name the exact conditions, sub-market, or timing that make the residual edge real and defensible. 150 words max. End with: "The real edge: [one sentence]". Plain text only.`;
 
-Be surgical. Don't try to argue for or against — find the exact version of this play that is real, accessible, and has genuine asymmetric payoff. 150-200 words. No preamble. End with one line: "The real edge: [one sentence on what survives both sides]". Output plain text only.`;
+const SYNTHESIS_PROMPT = `You are the final synthesis engine. Three analysts debated one opportunity (Bull argued for, Bear argued against, Moderator found what survives). Forge the surviving edge into ONE actionable card.
 
-const SYNTHESIS_PROMPT = `You are the final arbitrage synthesis engine. Three analysts have debated this opportunity:
-- Analyst 0 (Bull) made the case FOR it
-- Analyst 1 (Bear) made the case AGAINST it
-- Analyst 2 (Moderator) found what survives the debate
+${CONSTRAINTS}
 
-Your job: take the moderator's refined edge and forge it into ONE singular, razor-sharp arbitrage opportunity. The bull gave you the mechanism. The bear killed the weak parts. The moderator found the real play. You make it actionable.
+Output format (bold labels, no extras):
 
-Rules:
-- Zero capital, zero license, accessible to any individual today
-- Extreme asymmetric payoff: tiny downside, massive (10x–100x) upside
-- It must feel "spooky" — obvious once said, invisible until now
-- Not stocks, crypto bots, real estate, or Amazon FBA
-
-Output in this exact format:
-
-**Opportunity Name:** (one catchy, memorable line)
-**Market:** (one sentence — the specific market being exploited)
-**The Edge:** (what the debate revealed — the precise inefficiency that survives scrutiny)
+**Opportunity Name:** (one memorable line)
+**Market:** (one sentence)
+**The Edge:** (precise inefficiency that survived the debate)
 **Bull was right about:** (one sentence)
-**Bear was right about:** (one sentence — the version that DOESN'T work)
+**Bear was right about:** (one sentence — the version that doesn't work)
 **How Anyone Does It:**
 • step 1
 • step 2
-• step 3 (max 4 steps)
+• step 3
 **Asymmetric Payoff:** Worst case = ___ | Best case = ___
 **Why Zero Competition:** (one sentence)
-**Window:** (how long before this closes and why)
+**Window:** (how long and why)
 
-Then end with a single JSON line: {"confidence": <0.0-1.0>, "edgeTag": "<lag|fragmentation|mismatch|inertia>"}
-Output markdown bold labels followed by the JSON line. No other formatting.`;
+End with: {"confidence": <0.0-1.0>, "edgeTag": "<lag|fragmentation|mismatch|inertia>"}`;
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
