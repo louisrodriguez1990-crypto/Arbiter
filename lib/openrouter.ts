@@ -3,24 +3,21 @@ import OpenAI from "openai";
 // ─── Model IDs ────────────────────────────────────────────────────────────────
 
 export const MODELS = {
-  // Primary analyst — DeepSeek V3.1 hybrid reasoning model
-  analyst: "deepseek/deepseek-chat-v3.1",
+  // One researcher per lane — Gemini 2.5 Flash (fast, large context, no free-tier rate limits)
+  researcher: "google/gemini-2.5-flash-preview-05-20",
 
-  // Research swarm — 2× Step-3.5 Flash (free) + 1× Gemini 2.5 Flash (deep research, 1M ctx)
-  researcherA: "stepfun/step-3.5-flash:free",
-  researcherB: "stepfun/step-3.5-flash:free",
-  researcherC: "google/gemini-2.5-flash",
-
-  // Orchestration (decompose + synthesis) — DeepSeek V3.1 for full-pipeline reasoning
-  utility: "deepseek/deepseek-chat-v3.1",
+  // Analyst + synthesis — DeepSeek V3 (strong reasoning, fast streaming)
+  analyst:  "deepseek/deepseek-chat",
+  utility:  "deepseek/deepseek-chat",
 } as const;
 
-// Per-swarm researcher assignment — each swarm gets the same three models
-export const SWARM_RESEARCHERS: [string, string, string] = [
-  MODELS.researcherA,
-  MODELS.researcherB,
-  MODELS.researcherC,
-];
+// ─── Token budgets (keep every call short to stay under 25s Edge limit) ──────
+
+export const MAX_TOKENS = {
+  researcher: 250,
+  analyst:    350,
+  synthesis:  550,
+} as const;
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -51,7 +48,8 @@ export async function callModel(
   client: OpenAI,
   model: string,
   messages: ChatMessage[],
-  systemPrompt?: string
+  systemPrompt?: string,
+  maxTokens?: number
 ): Promise<string> {
   const msgs: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   if (systemPrompt) msgs.push({ role: "system", content: systemPrompt });
@@ -61,6 +59,7 @@ export async function callModel(
     model,
     messages: msgs,
     temperature: 0.7,
+    ...(maxTokens ? { max_tokens: maxTokens } : {}),
   });
 
   return response.choices[0]?.message?.content ?? "";
@@ -68,14 +67,14 @@ export async function callModel(
 
 /**
  * Streaming call. Yields text deltas and returns the full accumulated text.
- * The `onChunk` callback fires for each token delta.
  */
 export async function streamModel(
   client: OpenAI,
   model: string,
   messages: ChatMessage[],
   onChunk: (delta: string) => void,
-  systemPrompt?: string
+  systemPrompt?: string,
+  maxTokens?: number
 ): Promise<string> {
   const msgs: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   if (systemPrompt) msgs.push({ role: "system", content: systemPrompt });
@@ -86,6 +85,7 @@ export async function streamModel(
     messages: msgs,
     stream: true,
     temperature: 0.7,
+    ...(maxTokens ? { max_tokens: maxTokens } : {}),
   });
 
   let full = "";

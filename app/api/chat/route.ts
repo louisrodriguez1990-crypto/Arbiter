@@ -7,7 +7,7 @@ import {
   callModel,
   streamModel,
   MODELS,
-  SWARM_RESEARCHERS,
+  MAX_TOKENS,
   type ChatMessage,
 } from "@/lib/openrouter";
 
@@ -92,73 +92,48 @@ interface CompleteMessage {
 // ─── Swarm orchestration ──────────────────────────────────────────────────────
 
 /**
- * Run 3 free researchers in parallel on one angle, return combined brief.
+ * Run one researcher for a lane, emit the chunk, return the brief.
  */
-async function runResearchSwarm(
+async function runResearch(
   angle: string,
   history: ChatMessage[],
-  swarmIdx: number,
+  laneIdx: number,
   sendEvent: (e: SwarmEvent) => void
 ): Promise<string> {
   const client = createClient();
-
-  const researchPromises = SWARM_RESEARCHERS.map(async (model) => {
-    const messages: ChatMessage[] = [
-      ...history,
-      {
-        role: "user",
-        content: `Research angle: "${angle}"\n\nProvide a research brief covering this angle in the context of the conversation.`,
-      },
-    ];
-
-    const text = await callModel(client, model, messages, RESEARCHER_PROMPT);
-
-    // Stream each researcher's output as it completes (non-streaming API — emit full chunk)
-    sendEvent({
-      type: "research_chunk",
-      swarm: swarmIdx,
-      model: model.split("/").pop() ?? model,
-      content: text,
-    });
-
-    return text;
-  });
-
-  const briefs = await Promise.all(researchPromises);
-  return briefs.join("\n\n---\n\n");
+  const messages: ChatMessage[] = [
+    ...history,
+    { role: "user", content: `Investigation leg: "${angle}"\n\nProvide your intelligence brief.` },
+  ];
+  const text = await callModel(client, MODELS.researcher, messages, RESEARCHER_PROMPT, MAX_TOKENS.researcher);
+  sendEvent({ type: "research_chunk", swarm: laneIdx, model: "gemini-2.5-flash", content: text });
+  return text;
 }
 
 /**
- * Run one DeepSeek analyst on the combined research brief (streaming).
+ * Run one DeepSeek analyst on the research brief (streaming).
  */
 async function runAnalyst(
   angle: string,
-  combinedBrief: string,
+  brief: string,
   history: ChatMessage[],
   instance: number,
   sendEvent: (e: SwarmEvent) => void
 ): Promise<string> {
   const client = createClient();
-
   const messages: ChatMessage[] = [
     ...history,
-    {
-      role: "user",
-      content: `Primary research angle: "${angle}"\n\nResearch briefs from swarm:\n\n${combinedBrief}\n\nProvide your analysis.`,
-    },
+    { role: "user", content: `Investigation leg: "${angle}"\n\nIntelligence brief:\n\n${brief}\n\nProvide your analysis.` },
   ];
-
   return streamModel(
-    client,
-    MODELS.analyst,
-    messages,
+    client, MODELS.analyst, messages,
     (delta) => sendEvent({ type: "analyst_chunk", instance, content: delta }),
-    ANALYST_PROMPT
+    ANALYST_PROMPT, MAX_TOKENS.analyst
   );
 }
 
 /**
- * Run swarm research then analyst for one lane. Returns analyst output.
+ * Run researcher then analyst for one lane.
  */
 async function runLane(
   angle: string,
@@ -166,8 +141,8 @@ async function runLane(
   laneIdx: number,
   sendEvent: (e: SwarmEvent) => void
 ): Promise<string> {
-  const combinedBrief = await runResearchSwarm(angle, history, laneIdx, sendEvent);
-  return runAnalyst(angle, combinedBrief, history, laneIdx, sendEvent);
+  const brief = await runResearch(angle, history, laneIdx, sendEvent);
+  return runAnalyst(angle, brief, history, laneIdx, sendEvent);
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -202,32 +177,16 @@ export async function POST(req: NextRequest) {
       try {
         const client = createClient();
 
-        // ── Phase 0: Decompose ───────────────────────────────────────────────
-        sendEvent({ type: "phase", phase: "decompose", label: "Identifying the three legs of the hidden opportunity…" });
+        // ── Phase 0: Decompose (hardcoded angles — saves ~4s vs LLM call) ───
+        sendEvent({ type: "phase", phase: "decompose", label: "Targeting the three investigation legs…" });
 
         const userQuery = history.at(-1)?.content ?? "";
 
-        let angles: string[] = [];
-        try {
-          const raw = await callModel(
-            client,
-            MODELS.utility,
-            [{ role: "user", content: `Query: ${userQuery}` }],
-            DECOMPOSE_PROMPT
-          );
-          // Strip markdown fences if present
-          const cleaned = raw.replace(/```[a-z]*\n?/g, "").trim();
-          angles = JSON.parse(cleaned);
-          if (!Array.isArray(angles) || angles.length < 3) throw new Error("bad parse");
-          angles = angles.slice(0, 3);
-        } catch {
-          // Fallback: use the query itself for all 3 angles with slight variations
-          angles = [
-            `Supply dynamics leg: ${userQuery}`,
-            `Demand blindspot leg: ${userQuery}`,
-            `Timing and catalyst leg: ${userQuery}`,
-          ];
-        }
+        const angles = [
+          `Supply dynamics — who controls the resource, what are their real incentives, where is the structural inefficiency: ${userQuery}`,
+          `Demand blindspot — who actually wants this and doesn't know where to get it, what false assumption keeps buyer and seller apart: ${userQuery}`,
+          `Timing and catalyst — what recent shift just created this gap and how long before it closes: ${userQuery}`,
+        ];
 
         // ── Phase 1+2: Parallel research swarms + analysts ───────────────────
         sendEvent({ type: "phase", phase: "research", label: "Running three collaborative investigation legs in parallel…" });
@@ -254,7 +213,8 @@ export async function POST(req: NextRequest) {
           MODELS.utility,
           synthMessages,
           (delta) => sendEvent({ type: "synthesis_chunk", content: delta }),
-          SYNTHESIS_PROMPT
+          SYNTHESIS_PROMPT,
+          MAX_TOKENS.synthesis
         );
 
         // ── Extract metadata ─────────────────────────────────────────────────
