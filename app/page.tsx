@@ -948,7 +948,7 @@ export default function Arbiter() {
               letterSpacing: "0.06em",
             }}
           >
-            lag · fragmentation · mismatch · inertia · 9×research · 3×deepseek · synthesis
+            3×gemini research · bull · bear · moderate · deepseek synthesis
           </div>
         </div>
       </div>

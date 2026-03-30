@@ -26,49 +26,54 @@ const RESEARCHER_PROMPT = `You are one leg of a three-part arbitrage investigati
 
 Given your specific investigation directive, produce a dense intelligence brief (150-250 words) focused on: concrete mechanisms, specific actors, real pricing data, behavioral patterns, and the structural reason this gap exists and persists. Do NOT try to name the final opportunity — just surface the raw intelligence for your leg. Be ruthlessly specific. Output plain text only.`;
 
-const ANALYST_PROMPT = `You are one of three parallel reasoning engines working toward ONE shared conclusion. You are NOT finding your own opportunity — you are building your piece of an argument. The other two engines are investigating complementary legs of the same hidden arbitrage.
+const ANALYST_PROMPT_BULL = `You are the BULL. Your job is to make the strongest possible case FOR this arbitrage opportunity based on the intelligence brief you've been given.
 
-You receive your investigation leg and 3 intelligence briefs. Your job:
-1. Extract the sharpest signal from the briefs for your leg
-2. Identify what specific mechanism or gap your leg contributes to the final opportunity
-3. State what the other legs MUST confirm for this to be a real play
-4. End with one sentence: "My leg contributes: [the specific thing you've confirmed]"
+Find the most compelling evidence that this play is real, accessible, and has genuine asymmetric upside. Steel-man it. Assume the opportunity exists — your job is to explain exactly WHY it works, WHO is leaving money on the table, and WHAT the specific mechanism is that makes it exploitable right now.
 
-Core constraints for the final opportunity this is building toward:
-- Zero capital, zero license, accessible to any individual today
-- Extreme asymmetric payoff: tiny downside, 10x–100x upside
-- "Spooky" — obvious in hindsight, invisible now because it connects things nobody has connected
-- Not stocks, crypto bots, real estate, or Amazon FBA
+Be specific and concrete. Name the real actors, real dynamics, real pricing gaps. 150-200 words. No preamble. End with one line: "Bull case: [one sentence on why this is real]". Output plain text only.`;
 
-150-200 words. No preamble. Output plain text only.`;
+const ANALYST_PROMPT_BEAR = `You are the BEAR. Your job is to make the strongest possible case AGAINST this arbitrage opportunity based on the intelligence brief you've been given.
 
-const SYNTHESIS_PROMPT = `You are the final synthesis engine of a collaborative arbitrage investigation. Three parallel reasoning engines have each investigated one leg of the same hidden opportunity: supply dynamics, demand blindspot, and timing catalyst. Your job is to connect all three into ONE singular, razor-sharp arbitrage opportunity that could not have been found without every leg.
+Tear it apart. Find every reason it doesn't work, can't scale, has hidden costs, or has already been arbitraged away. What are the real barriers people aren't seeing? Who actually benefits from maintaining this inefficiency and has the power to block you? What's the fatal assumption that makes this seem like an opportunity but isn't?
+
+Be ruthless and specific. 150-200 words. No preamble. End with one line: "Bear case: [one sentence on the fatal flaw]". Output plain text only.`;
+
+const ANALYST_PROMPT_MODERATE = `You are the MODERATOR. You've heard both the bull and bear arguments. Your job is to find the narrow version of this opportunity that survives the bear's objections.
+
+Where exactly does the bull case hold up under scrutiny? What specific conditions, timing, or sub-market make this real even if the broad version is flawed? Strip away the parts the bear killed. What remains is the precise, defensible edge.
+
+Be surgical. Don't try to argue for or against — find the exact version of this play that is real, accessible, and has genuine asymmetric payoff. 150-200 words. No preamble. End with one line: "The real edge: [one sentence on what survives both sides]". Output plain text only.`;
+
+const SYNTHESIS_PROMPT = `You are the final arbitrage synthesis engine. Three analysts have debated this opportunity:
+- Analyst 0 (Bull) made the case FOR it
+- Analyst 1 (Bear) made the case AGAINST it
+- Analyst 2 (Moderator) found what survives the debate
+
+Your job: take the moderator's refined edge and forge it into ONE singular, razor-sharp arbitrage opportunity. The bull gave you the mechanism. The bear killed the weak parts. The moderator found the real play. You make it actionable.
 
 Rules:
-- Read all three analyst outputs and find the single thread connecting them
-- The opportunity must emerge FROM the intersection — not from any one leg alone
-- It must be zero-capital, zero-license, accessible to any individual today
+- Zero capital, zero license, accessible to any individual today
 - Extreme asymmetric payoff: tiny downside, massive (10x–100x) upside
-- It must feel "spooky" — the kind of thing that's obvious once said but invisible until now
+- It must feel "spooky" — obvious once said, invisible until now
+- Not stocks, crypto bots, real estate, or Amazon FBA
 
 Output in this exact format:
 
 **Opportunity Name:** (one catchy, memorable line)
 **Market:** (one sentence — the specific market being exploited)
-**The Hidden Connection:** (one sentence — what only becomes visible when all three legs are combined)
-**The Edge:** (what invisible inefficiency you're exploiting and why it exists)
+**The Edge:** (what the debate revealed — the precise inefficiency that survives scrutiny)
+**Bull was right about:** (one sentence)
+**Bear was right about:** (one sentence — the version that DOESN'T work)
 **How Anyone Does It:**
 • step 1
 • step 2
 • step 3 (max 4 steps)
 **Asymmetric Payoff:** Worst case = ___ | Best case = ___
-**Why Zero Competition:** (one sentence — the real reason nobody has done this)
+**Why Zero Competition:** (one sentence)
 **Window:** (how long before this closes and why)
 
 Then end with a single JSON line: {"confidence": <0.0-1.0>, "edgeTag": "<lag|fragmentation|mismatch|inertia>"}
-Output markdown bold labels followed by the JSON line. No other formatting.
-
-`;
+Output markdown bold labels followed by the JSON line. No other formatting.`;
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
@@ -110,8 +115,11 @@ async function runResearch(
   return text;
 }
 
+const ANALYST_PROMPTS = [ANALYST_PROMPT_BULL, ANALYST_PROMPT_BEAR, ANALYST_PROMPT_MODERATE];
+const ANALYST_LABELS = ["bull", "bear", "moderate"];
+
 /**
- * Run one DeepSeek analyst on the research brief (streaming).
+ * Run one analyst (bull / bear / moderate) on the research brief (streaming).
  */
 async function runAnalyst(
   angle: string,
@@ -121,19 +129,20 @@ async function runAnalyst(
   sendEvent: (e: SwarmEvent) => void
 ): Promise<string> {
   const client = createClient();
+  const label = ANALYST_LABELS[instance] ?? "analyst";
   const messages: ChatMessage[] = [
     ...history,
-    { role: "user", content: `Investigation leg: "${angle}"\n\nIntelligence brief:\n\n${brief}\n\nProvide your analysis.` },
+    { role: "user", content: `Role: ${label.toUpperCase()}\nInvestigation leg: "${angle}"\n\nIntelligence brief:\n\n${brief}\n\nProvide your ${label} analysis.` },
   ];
   return streamModel(
     client, MODELS.analyst, messages,
     (delta) => sendEvent({ type: "analyst_chunk", instance, content: delta }),
-    ANALYST_PROMPT, MAX_TOKENS.analyst
+    ANALYST_PROMPTS[instance], MAX_TOKENS.analyst
   );
 }
 
 /**
- * Run researcher then analyst for one lane.
+ * Run researcher then analyst for one lane (0=bull, 1=bear, 2=moderate).
  */
 async function runLane(
   angle: string,
@@ -203,7 +212,7 @@ export async function POST(req: NextRequest) {
         const synthMessages: ChatMessage[] = [
           {
             role: "user",
-            content: `Original query: "${userQuery}"\n\nThree collaborative investigation legs have each uncovered one piece of the same hidden opportunity. Connect them into ONE singular play.\n\n### Leg 0 — Supply Dynamics (${angles[0]})\n${analysis0}\n\n### Leg 1 — Demand Blindspot (${angles[1]})\n${analysis1}\n\n### Leg 2 — Timing & Catalyst (${angles[2]})\n${analysis2}\n\nWhat single opportunity only becomes visible when all three legs are read together?`,
+            content: `Original query: "${userQuery}"\n\n### Analyst 0 — BULL (argued FOR the opportunity)\n${analysis0}\n\n### Analyst 1 — BEAR (argued AGAINST the opportunity)\n${analysis1}\n\n### Analyst 2 — MODERATOR (found what survives the debate)\n${analysis2}\n\nForge the debate into ONE singular, defensible arbitrage opportunity.`,
           },
         ];
 
