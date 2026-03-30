@@ -13,55 +13,62 @@ import {
 
 // ─── System prompts ───────────────────────────────────────────────────────────
 
-const DECOMPOSE_PROMPT = `You are a first-principles arbitrage decomposition engine. Given a user query or topic, produce exactly 3 distinct arbitrage research angles. Each angle must target a different inefficiency lens: Lag (prices haven't caught up to reality), Fragmentation (same thing priced differently across segments), Mismatch (market operating on a false assumption), or Inertia (slow incumbents can't react). Prioritise angles that expose zero-capital, zero-license opportunities accessible to any individual today.
+const DECOMPOSE_PROMPT = `You are a first-principles arbitrage decomposition engine. Your job is NOT to find multiple opportunities — it is to find ONE hidden opportunity that requires three separate lenses to see. Break the user's query into exactly 3 complementary investigation legs that, when combined, reveal a single invisible arbitrage that no single line of inquiry could surface alone.
 
-Respond with ONLY a JSON array of 3 strings — each string is a sharp, specific research angle. No explanation, no markdown fences.
-Example: ["Lag angle: ...", "Fragmentation angle: ...", "Mismatch angle: ..."]`;
+Leg 0 — SUPPLY DYNAMICS: Who controls the resource, what are their real incentives, and where is the structural inefficiency hiding?
+Leg 1 — DEMAND BLINDSPOT: Who actually wants this and doesn't know where to get it? What false assumption keeps buyer and seller apart?
+Leg 2 — TIMING & CATALYST: What recent shift (regulatory, technological, behavioral) just created this gap — and how long before it closes?
 
-const RESEARCHER_PROMPT = `You are a first-principles market intelligence analyst for an arbitrage synthesis engine. Given a specific research angle, produce a dense factual brief (150-250 words) that surfaces concrete data points, pricing gaps, behavioral quirks, or structural inefficiencies. Focus on things that feel obvious in hindsight but are invisible to most people. Identify who benefits from the current inefficiency and why they want it to stay hidden. Be ruthlessly specific — name the mechanism, not just the theme. Output plain text only.`;
+Respond with ONLY a JSON array of 3 strings. Each string is a sharp, specific investigation directive for that leg. No explanation, no markdown fences.
+Example: ["Supply leg: ...", "Demand leg: ...", "Timing leg: ..."]`;
 
-const ANALYST_PROMPT = `You are Arbiter, a first-principles arbitrage synthesis engine. Your only job is to invent brand-new, zero-competition arbitrage opportunities that literally no one is looking for yet.
+const RESEARCHER_PROMPT = `You are one leg of a three-part arbitrage investigation. You are building ONE piece of a puzzle — your findings will be combined with two other legs to reveal a single hidden opportunity that none of the legs could find alone.
 
-Core rules:
-* Focus ONLY on markets that ANYONE can enter right now with almost zero capital, no special licenses, no big team, and no expensive tech.
-* The opportunity must have extreme asymmetric risk/reward: tiny downside (little or no money/time lost if it fails), massive upside (10x–100x potential returns).
-* It must feel "spooky" — obvious in hindsight but invisible to normal people because it exploits something nobody has connected yet.
-* Never suggest crowded, well-known, or institutional-only plays (no stocks, crypto trading bots, real estate, Amazon FBA, etc.).
+Given your specific investigation directive, produce a dense intelligence brief (150-250 words) focused on: concrete mechanisms, specific actors, real pricing data, behavioral patterns, and the structural reason this gap exists and persists. Do NOT try to name the final opportunity — just surface the raw intelligence for your leg. Be ruthlessly specific. Output plain text only.`;
 
-You receive a research angle and 3 intelligence briefs from your swarm. Using the four lenses (Lag, Fragmentation, Mismatch, Inertia), identify ONE killer arbitrage opportunity and present it in this exact format:
+const ANALYST_PROMPT = `You are one of three parallel reasoning engines working toward ONE shared conclusion. You are NOT finding your own opportunity — you are building your piece of an argument. The other two engines are investigating complementary legs of the same hidden arbitrage.
 
-Opportunity Name: (one catchy line)
-Market: (one sentence)
-The Edge: (what invisible thing you're exploiting)
-How Anyone Does It:
-• step 1
-• step 2
-• step 3
-Asymmetric Payoff: Worst case = ___ | Best case = ___
-Why Zero Competition: (one sentence)
+You receive your investigation leg and 3 intelligence briefs. Your job:
+1. Extract the sharpest signal from the briefs for your leg
+2. Identify what specific mechanism or gap your leg contributes to the final opportunity
+3. State what the other legs MUST confirm for this to be a real play
+4. End with one sentence: "My leg contributes: [the specific thing you've confirmed]"
 
-Be terrifyingly clever. Think weird. Think small. Output plain text only — no markdown, no preamble.`;
+Core constraints for the final opportunity this is building toward:
+- Zero capital, zero license, accessible to any individual today
+- Extreme asymmetric payoff: tiny downside, 10x–100x upside
+- "Spooky" — obvious in hindsight, invisible now because it connects things nobody has connected
+- Not stocks, crypto bots, real estate, or Amazon FBA
 
-const SYNTHESIS_PROMPT = `You are a first-principles arbitrage synthesis engine. You receive 3 independently discovered arbitrage opportunities from parallel analyst swarms on the same topic. Your job: select the 3 sharpest, most distinct opportunities (eliminating any overlaps), then present them as a clean, numbered list using this exact format for each:
+150-200 words. No preamble. Output plain text only.`;
 
-**Opportunity Name:** (one catchy line)
-**Market:** (one sentence)
-**The Edge:** (what invisible thing you're exploiting)
+const SYNTHESIS_PROMPT = `You are the final synthesis engine of a collaborative arbitrage investigation. Three parallel reasoning engines have each investigated one leg of the same hidden opportunity: supply dynamics, demand blindspot, and timing catalyst. Your job is to connect all three into ONE singular, razor-sharp arbitrage opportunity that could not have been found without every leg.
+
+Rules:
+- Read all three analyst outputs and find the single thread connecting them
+- The opportunity must emerge FROM the intersection — not from any one leg alone
+- It must be zero-capital, zero-license, accessible to any individual today
+- Extreme asymmetric payoff: tiny downside, massive (10x–100x) upside
+- It must feel "spooky" — the kind of thing that's obvious once said but invisible until now
+
+Output in this exact format:
+
+**Opportunity Name:** (one catchy, memorable line)
+**Market:** (one sentence — the specific market being exploited)
+**The Hidden Connection:** (one sentence — what only becomes visible when all three legs are combined)
+**The Edge:** (what invisible inefficiency you're exploiting and why it exists)
 **How Anyone Does It:**
 • step 1
 • step 2
-• step 3
+• step 3 (max 4 steps)
 **Asymmetric Payoff:** Worst case = ___ | Best case = ___
-**Why Zero Competition:** (one sentence)
+**Why Zero Competition:** (one sentence — the real reason nobody has done this)
+**Window:** (how long before this closes and why)
 
----
+Then end with a single JSON line: {"confidence": <0.0-1.0>, "edgeTag": "<lag|fragmentation|mismatch|inertia>"}
+Output markdown bold labels followed by the JSON line. No other formatting.
 
-Rules:
-- Keep only the most asymmetric, most accessible, most "spooky" opportunities
-- If two analysts found similar plays, merge them into one sharper version
-- Add a one-sentence intro and a one-sentence closing conviction statement
-- End with a single JSON line: {"confidence": <0.0-1.0>, "edgeTag": "<lag|fragmentation|mismatch|inertia>"}
-- Output plain text + markdown bold labels followed by the JSON line. No other formatting.`;
+`;
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
@@ -196,7 +203,7 @@ export async function POST(req: NextRequest) {
         const client = createClient();
 
         // ── Phase 0: Decompose ───────────────────────────────────────────────
-        sendEvent({ type: "phase", phase: "decompose", label: "Decomposing query into research angles…" });
+        sendEvent({ type: "phase", phase: "decompose", label: "Identifying the three legs of the hidden opportunity…" });
 
         const userQuery = history.at(-1)?.content ?? "";
 
@@ -216,14 +223,14 @@ export async function POST(req: NextRequest) {
         } catch {
           // Fallback: use the query itself for all 3 angles with slight variations
           angles = [
-            `Structural dimension: ${userQuery}`,
-            `Temporal dimension: ${userQuery}`,
-            `Behavioral dimension: ${userQuery}`,
+            `Supply dynamics leg: ${userQuery}`,
+            `Demand blindspot leg: ${userQuery}`,
+            `Timing and catalyst leg: ${userQuery}`,
           ];
         }
 
         // ── Phase 1+2: Parallel research swarms + analysts ───────────────────
-        sendEvent({ type: "phase", phase: "research", label: "Launching parallel research swarms…" });
+        sendEvent({ type: "phase", phase: "research", label: "Running three collaborative investigation legs in parallel…" });
 
         const [analysis0, analysis1, analysis2] = await Promise.all([
           runLane(angles[0], history, 0, sendEvent),
@@ -232,12 +239,12 @@ export async function POST(req: NextRequest) {
         ]);
 
         // ── Phase 3: Synthesis ───────────────────────────────────────────────
-        sendEvent({ type: "phase", phase: "synthesis", label: "Synthesizing analyst outputs…" });
+        sendEvent({ type: "phase", phase: "synthesis", label: "Connecting all three legs into the single hidden opportunity…" });
 
         const synthMessages: ChatMessage[] = [
           {
             role: "user",
-            content: `Original query: "${userQuery}"\n\n### Analyst 0 (${angles[0]})\n${analysis0}\n\n### Analyst 1 (${angles[1]})\n${analysis1}\n\n### Analyst 2 (${angles[2]})\n${analysis2}`,
+            content: `Original query: "${userQuery}"\n\nThree collaborative investigation legs have each uncovered one piece of the same hidden opportunity. Connect them into ONE singular play.\n\n### Leg 0 — Supply Dynamics (${angles[0]})\n${analysis0}\n\n### Leg 1 — Demand Blindspot (${angles[1]})\n${analysis1}\n\n### Leg 2 — Timing & Catalyst (${angles[2]})\n${analysis2}\n\nWhat single opportunity only becomes visible when all three legs are read together?`,
           },
         ];
 
