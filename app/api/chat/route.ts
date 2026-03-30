@@ -1,3 +1,6 @@
+export const runtime = "edge";
+export const maxDuration = 300; // seconds — respected on Pro; edge has no cap
+
 import { NextRequest } from "next/server";
 import {
   createClient,
