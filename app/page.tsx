@@ -325,6 +325,10 @@ export default function Arbiter() {
         body: JSON.stringify({ history }),
       });
 
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`API error ${response.status}: ${errText.slice(0, 300)}`);
+      }
       if (!response.body) throw new Error("No response body");
 
       const reader = response.body.getReader();
