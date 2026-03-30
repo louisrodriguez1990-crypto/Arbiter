@@ -6,13 +6,13 @@ export const MODELS = {
   // Primary analyst — DeepSeek V3.1 hybrid reasoning model
   analyst: "deepseek/deepseek-chat-v3.1",
 
-  // Research swarm — StepFun Step-3.5 Flash (free, 256K context)
+  // Research swarm — 2× Step-3.5 Flash (free) + 1× Gemini 2.5 Flash (deep research, 1M ctx)
   researcherA: "stepfun/step-3.5-flash:free",
   researcherB: "stepfun/step-3.5-flash:free",
-  researcherC: "stepfun/step-3.5-flash:free",
+  researcherC: "google/gemini-2.5-flash",
 
-  // Utility (decompose + synthesis)
-  utility: "stepfun/step-3.5-flash:free",
+  // Orchestration (decompose + synthesis) — DeepSeek V3.1 for full-pipeline reasoning
+  utility: "deepseek/deepseek-chat-v3.1",
 } as const;
 
 // Per-swarm researcher assignment — each swarm gets the same three models

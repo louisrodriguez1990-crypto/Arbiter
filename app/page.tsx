@@ -477,7 +477,7 @@ export default function Arbiter() {
               marginLeft: 8,
             }}
           >
-            3×deepseek-v3.1 · step-3.5 swarm
+            3×deepseek-v3.1 · step-3.5 + gemini swarm
           </span>
         </div>
         <span
@@ -944,7 +944,7 @@ export default function Arbiter() {
               letterSpacing: "0.06em",
             }}
           >
-            3×deepseek-v3.1 · 9×step-3.5-flash · 1 synthesis
+            decompose · 6×step-3.5 · 3×gemini-2.5-flash · 3×deepseek · synthesis
           </div>
         </div>
       </div>
