@@ -7,8 +7,8 @@ export const MODELS = {
   researcher: "google/gemini-2.5-flash",
 
   // Analyst + synthesis — DeepSeek V3 (strong reasoning, fast streaming)
-  analyst:  "deepseek/deepseek-chat",
-  utility:  "deepseek/deepseek-chat",
+  analyst:  "deepseek/deepseek-v3.2",
+  utility:  "deepseek/deepseek-v3.2",
 } as const;
 
 // ─── Token budgets (keep every call short to stay under 25s Edge limit) ──────
