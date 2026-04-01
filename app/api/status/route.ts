@@ -1,31 +1,65 @@
-import { createClient, MODELS } from "@/lib/openrouter";
+import { MODELS } from "@/lib/openrouter";
 
-export const runtime = "edge";
+/** Node runtime so `.env.local` is reliably loaded in dev (Edge can miss env with some Next/Turbopack setups). */
+export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const keySet = !!process.env.OPENROUTER_API_KEY;
+  const key = process.env.OPENROUTER_API_KEY?.trim();
 
-  if (!keySet) {
+  if (!key) {
     return Response.json(
-      { ok: false, error: "OPENROUTER_API_KEY environment variable is not set" },
-      { status: 500 }
+      {
+        ok: false,
+        keyLoaded: false,
+        error: "OPENROUTER_API_KEY is missing or empty",
+        hint: "Add OPENROUTER_API_KEY to .env.local in the project root (same folder as package.json), then restart `npm run dev`.",
+      },
+      { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" } }
     );
   }
 
   try {
-    const client = createClient();
-    // Minimal probe: ask the utility model for a one-word reply
-    const res = await client.chat.completions.create({
-      model: MODELS.utility,
-      messages: [{ role: "user", content: 'Reply with only the word "ok".' }],
-      max_tokens: 5,
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${key}`,
+      },
+      cache: "no-store",
     });
-    const reply = res.choices[0]?.message?.content ?? "";
-    return Response.json({ ok: true, model: MODELS.utility, reply: reply.trim() });
+
+    const text = await res.text();
+    if (!res.ok) {
+      return Response.json(
+        {
+          ok: false,
+          keyLoaded: true,
+          openrouter: "error",
+          httpStatus: res.status,
+          error: text.slice(0, 500),
+        },
+        { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" } }
+      );
+    }
+
+    return Response.json(
+      {
+        ok: true,
+        keyLoaded: true,
+        openrouter: "ok",
+        modelsEndpoint: "reachable",
+        defaultModel: MODELS.utility,
+      },
+      { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" } }
+    );
   } catch (err) {
     return Response.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
+      {
+        ok: false,
+        keyLoaded: true,
+        openrouter: "error",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" } }
     );
   }
 }

@@ -1,5 +1,5 @@
-export const runtime = "edge";
-export const maxDuration = 300; // seconds — respected on Pro; edge has no cap
+/** Node runtime: reliable `process.env` from `.env.local` in dev; Edge can omit env with some setups. */
+export const maxDuration = 300; // seconds — on Pro / compatible hosts
 
 import { NextRequest } from "next/server";
 import {
@@ -10,63 +10,211 @@ import {
   MAX_TOKENS,
   type ChatMessage,
 } from "@/lib/openrouter";
+import { getEvidenceForQuery } from "@/lib/evidence-sources";
 
 // ─── System prompts ───────────────────────────────────────────────────────────
 
-// Shared constraint block injected into every prompt — single source of truth
+// Shared constraint block — local flip / peer marketplace arbitrage
 const CONSTRAINTS = `ALLOW LIST (all outputs must satisfy every item):
-• MARKET: US local/physical/service markets only. Online if accessible to any American with a browser.
-• SCALE: <$500 capital. No license. No team. One person starts today.
-• RADAR: Below institutional radar — too small, too manual, too messy for hedge funds or pro traders.
-• INVISIBLE: Also invisible to side-hustle influencers. Not on YouTube, Reddit, or TikTok yet.
-• LENS: Must exploit ≥1 of — Lag (price hasn't caught demand shift) · Fragmentation (same thing priced differently by location/segment) · Mismatch (market runs on false assumption) · Inertia (small players/regulators react too slowly)
-• ASYMMETRY: Downside = wasted afternoon. Upside = $10k–$100k+ repeatable.
-• BANNED: Stocks, options, crypto, real estate, FBA, dropshipping, SMMA, anything already a side-hustle genre.`;
+• GEO: US-only. Focus on local peer marketplaces (Facebook Marketplace, OfferUp, Craigslist, Nextdoor, Mercari local pickup, garage/community sales) where you can inspect before you buy.
+• PLAY: Buy underpriced used goods locally, resell where velocity is high (eBay sold comps, Mercari, StockX/GOAT where applicable, specialty forums). One person, no warehouse team.
+• CAPITAL: Prefer deals under ~$500 per buy; stack small wins.
+• VELOCITY: Prioritize categories with fast sell-through (days–few weeks) when priced at market — not long-tail museum pieces unless the spread is huge.
+• HONESTY: You cannot open marketplace apps from here. Tell the user how THEY search: Google dork lines (below), in-app filters, and optional local HTML parse (repo script). Flag what must be verified in person. When Google Search grounding is enabled for this run, you may cite brief live web findings (trends, rough price bands) — still prioritize actionable dorks and filters.
+• EVIDENCE: Never present a **specific live listing, price, or deal** as fact unless you have a **verified http(s) URL** for it in this brief. If you have zero listing URLs, say so plainly and explain **why discovery failed** (indexing / login wall / JS-only pages / noindex / geo / query mismatch / rate limits / thin results) — do not fill the gap with invented inventory.
+• BANNED: Securities/options/crypto as the play, drop-shipping fantasy, multi-level schemes, stolen goods, counterfeits, anything requiring a dealer license where relevant.`;
 
-const RESEARCHER_PROMPT = `You are one leg of a three-part arbitrage investigation building toward ONE hidden opportunity.
+/** Indexable / search-operator playbook — models must emit concrete dorks, not fake URLs. */
+const GOOGLE_DORK_PLAYBOOK = `GOOGLE DORK TOOLKIT (give 3–6 copy-paste queries tailored to the user; combine with city/region keywords):
+• Facebook Marketplace (indexed crumbs): site:facebook.com/marketplace "YOUR_ITEM" "CITY_OR_ZIP" | site:facebook.com/marketplace/item/
+• OfferUp: site:offerup.com "YOUR_ITEM" | site:offerup.com/item/
+• Craigslist: site:*.craigslist.org intitle:YOUR_ITEM | site:craigslist.org/search "YOUR_ITEM" (swap subdomain for region, e.g. sfbay.craigslist.org)
+• Nextdoor / Mercari (sometimes indexed): site:nextdoor.com "for sale" YOUR_ITEM | site:mercari.com YOUR_ITEM
+• Noise control: add -site:pinterest.com -site:etsy.com when results are polluted; use quoted phrases for model numbers.
+• Sold comps (separate tab): site:ebay.com/sch/i.html "sold" YOUR_ITEM OR use eBay/Mercari sold filters inside the app (dorks are backup).`;
 
-${CONSTRAINTS}
+const LISTING_PARSE_SCRIPT = `Optional local parse: \`scripts/parse_listings.py\` (pip install -r requirements.txt; playwright install chromium). Save HTML after load, or \`-u URL --render --a11y\` for JS sites. JSON hints only — verify in-app.`;
 
-Surface raw intelligence for your assigned leg: concrete actors, real pricing data, behavioral patterns, structural reasons the gap persists. Do NOT name the final opportunity. 150 words max. Plain text only.`;
-
-const ANALYST_PROMPT_BULL = `You are the BULL on a three-analyst debate team.
-
-${CONSTRAINTS}
-
-Steel-man the opportunity from your intelligence brief. Name exactly WHO is leaving money on the table, WHY the gap exists, and WHAT makes it exploitable right now. 150 words max. End with: "Bull case: [one sentence]". Plain text only.`;
-
-const ANALYST_PROMPT_BEAR = `You are the BEAR on a three-analyst debate team.
-
-${CONSTRAINTS}
-
-Tear apart the opportunity from your intelligence brief. Find the fatal assumption, the hidden cost, or the reason it's already arbitraged. Name who benefits from keeping the gap and can block you. 150 words max. End with: "Bear case: [one sentence]". Plain text only.`;
-
-const ANALYST_PROMPT_MODERATE = `You are the MODERATOR on a three-analyst debate team.
+const RESEARCHER_PROMPT_LISTINGS = `You are STEP 1 — AVAILABLE LISTINGS / HUNT MAP for a local arbitrage workflow.
 
 ${CONSTRAINTS}
 
-Find the narrow version of this opportunity that survives the bear's attack. Strip what's broken. Name the exact conditions, sub-market, or timing that make the residual edge real and defensible. 150 words max. End with: "The real edge: [one sentence]". Plain text only.`;
+${GOOGLE_DORK_PLAYBOOK}
 
-const SYNTHESIS_PROMPT = `You are the final synthesis engine. Three analysts debated one opportunity (Bull argued for, Bear argued against, Moderator found what survives). Forge the surviving edge into ONE actionable card.
+${LISTING_PARSE_SCRIPT}
+
+Goal: describe how to **search and filter all relevant local inventory channels** (Marketplace, OfferUp, Craigslist, etc.) for the user's focus: keywords, filters, dork lines with real keywords/city, what “good” vs “bad” listings look like, meetup safety.
+
+For links: include only **verified, directly found listing URLs** (http/https) when you actually have them. Never invent, infer, or template URLs. If a platform has no verifiable item URLs, explicitly say so.
+
+End with a required section **### INDEXING REPORT** (bullets, plain text):
+• **Distinct listing URLs found:** number + list each URL on its own line (or "0")
+• **Platforms with no crawlable item URLs:** name each (e.g. Facebook Marketplace often behind login / thin indexing)
+• **Likely causes:** be specific (login wall, JS-rendered results, robots/noindex, wrong city terms, query too broad/narrow, category noise, rate limits, search tool returned snippets only)
+• **What the user should try next:** 2–4 concrete troubleshooting steps (not generic)
+
+Give 2–5 concrete product examples to stalk (categories/SKUs) with plausible local ask vs online exit **ranges** only as **hypothetical** if you have no URLs — label them "hypothetical (no listing URL found)". 280 words max for the main brief + indexing report. Plain text only.`;
+
+const RESEARCHER_PROMPT_COMPS = `You are STEP 2 — SOLD LISTINGS & PRICE GAP ANALYSIS.
 
 ${CONSTRAINTS}
 
-Output format (bold labels, no extras):
+You will receive OUTPUT FROM STEP 1 (listings scout) above your task. Your job: **cross-reference** those hunts with **sold / completed listings** logic (eBay sold, Mercari, StockX/GOAT where relevant, category forums).
 
-**Opportunity Name:** (one memorable line)
-**Market:** (one sentence)
-**The Edge:** (precise inefficiency that survived the debate)
-**Bull was right about:** (one sentence)
-**Bear was right about:** (one sentence — the version that doesn't work)
-**How Anyone Does It:**
-• step 1
-• step 2
-• step 3
-**Asymmetric Payoff:** Worst case = ___ | Best case = ___
-**Why Zero Competition:** (one sentence)
-**Window:** (how long and why)
+For each distinct hunt or SKU family the scout named, estimate: typical **local buy/ask band**, **sold comp band**, platform/shipping **fees**, **net gap** (spread), and what **kills** the gap (returns, auth, seasonality). Flag the largest **price gaps** first in your thinking.
 
-End with: {"confidence": <0.0-1.0>, "edgeTag": "<lag|fragmentation|mismatch|inertia>"}`;
+If STEP 1 had **zero verified listing URLs**, do not imply you validated local asks against real listings. Frame local bands as **hypothetical** unless tied to a URL from STEP 1. End with **### COMPS EVIDENCE NOTE**: sold-comp sources you relied on (e.g. eBay sold URL or "category-level only"). 240 words max. Plain text only.`;
+
+const ANALYST_PROMPT_SCOUT = `You are ANALYST 1 — LISTINGS SCOUT.
+
+${CONSTRAINTS}
+
+The brief below already includes dork lines and parse-script notes — synthesize, don't repeat them verbatim. Output a tight **hunt map**: where to search, top 3 subcategories/SKUs to stalk, exact dorks + in-app strings, max buy vs expected online exit, deal-breakers. If the brief had **no verified listing URLs**, state that clearly and do not pretend specific local deals exist. 200 words max. End with: "Top pick to hunt: [one line]". Plain text only.`;
+
+const ANALYST_PROMPT_ROI = `You are ANALYST 2 — SOLD COMPS & PRICE GAPS.
+
+${CONSTRAINTS}
+
+You have STEP 1 output in context. Turn the research brief into a **gap analysis**: for each hunt line, realistic buy band, sold band, fees, **net spread**, velocity tier (fast/medium/slow). Order your bullets by **largest net spread first** when possible. If there were **no verified listing URLs** in STEP 1, label spreads **hypothetical** and avoid claiming a specific local listing exists. 220 words max. End with: "Strongest gap: [one sentence]". Plain text only.`;
+
+/** Appended when OpenRouter web plugin is enabled for researcher lanes. */
+const GROUNDING_SYSTEM_APPEND = `Use live web results when relevant. If the search tool returns **no listing URLs** or only category pages, say so explicitly — list what failed (e.g. marketplace not indexed, login-only results, empty SERP) and why that limits evidence. Do not invent listings to compensate. Still obey the dork playbook and US-only constraints.`;
+
+const SYNTHESIS_PROMPT = `You are STEP 3 — OPPORTUNITY RANKER. You receive (1) listings scout + analyst and (2) sold-listing / gap analyst output.
+
+${CONSTRAINTS}
+
+The user message includes an **EVIDENCE GATE** line: distinct http(s) URLs counted from upstream research. Follow it exactly.
+
+**If EVIDENCE GATE count is 0:** Do **not** output a normal ranked ROI list as if deals were found. Instead output only:
+1) **Indexing & evidence gap** — bullet list: what blocked listing discovery (per platform: login wall, JS rendering, noindex/robots, SERP empty, wrong geo terms, category noise, tool limits, etc.)
+2) **Troubleshooting** — numbered steps the user can run next (queries to change, in-app filters, widen/narrow city, try Craigslist subdomain, use parse_listings.py, etc.)
+3) **Hypotheses (unverified)** — optional 2–4 bullets clearly labeled **UNVERIFIED** — category-level only, **no** fake listing URLs and **no** dollar ROI ranked as "opportunities"
+4) **Watch list / Pass on** — short
+
+Set confidence ≤ 0.35 in the JSON line.
+
+**If EVIDENCE GATE count is ≥ 1:** Produce a **ranked list of flip opportunities from highest estimated ROI (net spread after fees) to lowest**. Each opportunity must either cite a **verified listing URL** copied from upstream or be explicitly labeled **hypothesis (no listing URL)** with no fake precision.
+
+Output format when ranked list is allowed (bold labels, plain text):
+
+**Ranked opportunities** (repeat this block for each opportunity, in order — #1 = best ROI):
+**#N — [short name]**
+• **Local search:** where / how to find listings (platforms + filters or dorks)
+• **Typical local buy:** $ range
+• **Sold / online exit:** $ range (comps)
+• **Fees & shipping drag:** ~$
+• **Est. net per flip:** ~$
+• **Verified listing links:** 1–3 real http(s) listing URLs only if present upstream; otherwise "none — see link coverage"
+• **Link coverage:** one line stating where links are missing (e.g., "0 verified links for Facebook Marketplace due to indexing limits")
+• **ROI notes:** why the gap exists; what to verify in person
+• **Risk / kill:** one line
+
+After the list (at least 3 rows only if evidence supports real listings or clearly labeled hypotheses; otherwise fewer), add:
+
+**Watch list:** categories to monitor this week
+**Pass on:** what to skip
+
+End with: {"confidence": <0.0-1.0>, "edgeTag": "<lag|fragmentation|mismatch|inertia|velocity>"}`;
+
+const URL_REGEX = /\bhttps?:\/\/[^\s<>"')\]]+/gi;
+
+function isLikelyTemplateOrFake(url: string): boolean {
+  const lower = url.toLowerCase();
+  if (lower.includes("your_item") || lower.includes("city_or_zip")) return true;
+  if (lower.includes("example.com") || lower.includes("localhost")) return true;
+  if (lower.includes("{") || lower.includes("}") || lower.includes("<") || lower.includes(">")) return true;
+  return false;
+}
+
+function extractUrls(text: string): string[] {
+  return [...text.matchAll(URL_REGEX)].map((m) => m[0]);
+}
+
+/** True if URL plausibly points to a peer marketplace listing (not sold-comps sites like eBay). */
+function isLocalListingEvidenceUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    if (host.includes("craigslist.org")) return true;
+    if (host.includes("facebook.com") && path.includes("/marketplace")) return true;
+    if (host.includes("offerup.com") && path.includes("/item")) return true;
+    if (host.includes("nextdoor.com")) return true;
+    if (host.includes("mercari.com") && path.includes("/item")) return true;
+    if (host.includes("kijiji.com")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeSynthesisLinks(text: string, allowedSourceText: string): { text: string; kept: number; removed: number } {
+  const matches = [...text.matchAll(URL_REGEX)].map((m) => m[0]);
+  if (matches.length === 0) return { text, kept: 0, removed: 0 };
+
+  const allowedUrls = new Set(extractUrls(allowedSourceText).map((u) => u.trim()));
+  const unique = [...new Set(matches)];
+  const bad = new Set(
+    unique.filter((url) => {
+      if (isLikelyTemplateOrFake(url)) return true;
+      return !allowedUrls.has(url.trim());
+    })
+  );
+  let sanitized = text;
+  let removed = 0;
+
+  for (const url of bad) {
+    const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(escaped, "g");
+    const count = (sanitized.match(re) ?? []).length;
+    if (count > 0) {
+      removed += count;
+      sanitized = sanitized.replace(re, "[removed-unverified-link]");
+    }
+  }
+
+  return { text: sanitized, kept: matches.length - removed, removed };
+}
+
+function formatEvidenceContext(input: {
+  listings: Array<{ url: string; title: string; price?: number; source: string }>;
+  comps: { soldMin?: number; soldMax?: number; soldMedian?: number; sampleSoldUrls: string[] } | null;
+  usedSources: string[];
+  skippedSources: string[];
+}): string {
+  const listingLines = input.listings
+    .slice(0, 10)
+    .map((l, i) => {
+      const px = typeof l.price === "number" ? ` | $${l.price}` : "";
+      return `${i + 1}. ${l.title}${px} | ${l.source} | ${l.url}`;
+    })
+    .join("\n");
+  const compsLines = input.comps
+    ? [
+        `soldMin=${input.comps.soldMin ?? "n/a"}`,
+        `soldMedian=${input.comps.soldMedian ?? "n/a"}`,
+        `soldMax=${input.comps.soldMax ?? "n/a"}`,
+        ...input.comps.sampleSoldUrls.slice(0, 5).map((u) => `- ${u}`),
+      ].join("\n")
+    : "none";
+
+  return [
+    "### FETCHED EVIDENCE (from public/free APIs and feeds)",
+    `Used sources: ${input.usedSources.join(", ") || "none"}`,
+    `Skipped sources: ${input.skippedSources.join(" | ") || "none"}`,
+    `Listings fetched count: ${input.listings.length}`,
+    `Comps fetched count: ${input.comps?.sampleSoldUrls.length ?? 0}`,
+    "",
+    "Listing rows (verifiable URLs only):",
+    listingLines || "none",
+    "",
+    "Comps summary:",
+    compsLines,
+    "",
+    "Rules: treat listing rows above as highest-trust evidence; do not invent missing rows/URLs.",
+  ].join("\n");
+}
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
@@ -91,60 +239,146 @@ interface CompleteMessage {
 
 /**
  * Run one researcher for a lane, emit the chunk, return the brief.
+ * Optional prefix (e.g. Step 1 output for cross-reference in Step 2).
  */
 async function runResearch(
   angle: string,
   history: ChatMessage[],
   laneIdx: number,
-  sendEvent: (e: SwarmEvent) => void
+  researcherSystemPrompt: string,
+  sendEvent: (e: SwarmEvent) => void,
+  extraUserPrefix?: string
 ): Promise<string> {
   const client = createClient();
-  const messages: ChatMessage[] = [
-    ...history,
-    { role: "user", content: `Investigation leg: "${angle}"\n\nProvide your intelligence brief.` },
-  ];
-  const text = await callModel(client, MODELS.researcher, messages, RESEARCHER_PROMPT, MAX_TOKENS.researcher);
-  sendEvent({ type: "research_chunk", swarm: laneIdx, model: "gemini-2.5-flash", content: text });
+  const body = extraUserPrefix
+    ? `${extraUserPrefix.trim()}\n\n---\n\nInvestigation leg: "${angle}"\n\nProvide your intelligence brief.`
+    : `Investigation leg: "${angle}"\n\nProvide your intelligence brief.`;
+  const messages: ChatMessage[] = [...history, { role: "user", content: body }];
+  let text = "";
+  let modelLabel = "google/gemini-2.5-flash (OpenRouter)";
+
+  // #region agent log
+  fetch("http://127.0.0.1:7849/ingest/1b6ec78e-0033-46ec-95cb-4c223d740d0f", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "240042" },
+    body: JSON.stringify({
+      sessionId: "240042",
+      location: "app/api/chat/route.ts:runResearch",
+      message: "research_path",
+      data: { laneIdx, provider: "openrouter", model: MODELS.researcher },
+      timestamp: Date.now(),
+      hypothesisId: "H1",
+    }),
+  }).catch(() => {});
+  // #endregion
+
+  try {
+    text = await callModel(client, MODELS.researcher, messages, `${researcherSystemPrompt}\n\n${GROUNDING_SYSTEM_APPEND}`, {
+      maxTokens: MAX_TOKENS.researcher,
+      enableWebSearch: true,
+    });
+    // #region agent log
+    fetch("http://127.0.0.1:7849/ingest/1b6ec78e-0033-46ec-95cb-4c223d740d0f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "240042" },
+      body: JSON.stringify({
+        sessionId: "240042",
+        location: "app/api/chat/route.ts:runResearch",
+        message: "openrouter_web_success",
+        data: { laneIdx, textLen: text.length },
+        timestamp: Date.now(),
+        hypothesisId: "H2",
+      }),
+    }).catch(() => {});
+    // #endregion
+    modelLabel = "google/gemini-2.5-flash + web (OpenRouter)";
+    if (!text.trim()) {
+      throw new Error("Empty response with OpenRouter web plugin");
+    }
+  } catch {
+    // #region agent log
+    fetch("http://127.0.0.1:7849/ingest/1b6ec78e-0033-46ec-95cb-4c223d740d0f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "240042" },
+      body: JSON.stringify({
+        sessionId: "240042",
+        location: "app/api/chat/route.ts:runResearch",
+        message: "openrouter_web_failed",
+        data: { laneIdx },
+        timestamp: Date.now(),
+        hypothesisId: "H3",
+      }),
+    }).catch(() => {});
+    // #endregion
+    try {
+      text = await callModel(client, MODELS.researcher, messages, researcherSystemPrompt, MAX_TOKENS.researcher);
+      // #region agent log
+      fetch("http://127.0.0.1:7849/ingest/1b6ec78e-0033-46ec-95cb-4c223d740d0f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "240042" },
+        body: JSON.stringify({
+          sessionId: "240042",
+          location: "app/api/chat/route.ts:runResearch",
+          message: "openrouter_standard_success",
+          data: { laneIdx, textLen: text.length },
+          timestamp: Date.now(),
+          hypothesisId: "H4",
+        }),
+      }).catch(() => {});
+      // #endregion
+      modelLabel = "google/gemini-2.5-flash (OpenRouter fallback)";
+    } catch {
+      modelLabel = "deepseek-chat (fallback)";
+      text = await callModel(client, MODELS.analyst, messages, researcherSystemPrompt, MAX_TOKENS.researcher);
+    }
+  }
+  sendEvent({ type: "research_chunk", swarm: laneIdx, model: modelLabel, content: text });
   return text;
 }
 
-const ANALYST_PROMPTS = [ANALYST_PROMPT_BULL, ANALYST_PROMPT_BEAR, ANALYST_PROMPT_MODERATE];
-const ANALYST_LABELS = ["bull", "bear", "moderate"];
+const ANALYST_PROMPTS = [ANALYST_PROMPT_SCOUT, ANALYST_PROMPT_ROI] as const;
+const ANALYST_LABELS = ["scout", "roi"] as const;
 
 /**
- * Run one analyst (bull / bear / moderate) on the research brief (streaming).
+ * Run one analyst (scout or ROI) on the research brief (streaming).
  */
 async function runAnalyst(
   angle: string,
   brief: string,
   history: ChatMessage[],
   instance: number,
-  sendEvent: (e: SwarmEvent) => void
+  sendEvent: (e: SwarmEvent) => void,
+  extraUserPrefix?: string
 ): Promise<string> {
   const client = createClient();
   const label = ANALYST_LABELS[instance] ?? "analyst";
-  const messages: ChatMessage[] = [
-    ...history,
-    { role: "user", content: `Role: ${label.toUpperCase()}\nInvestigation leg: "${angle}"\n\nIntelligence brief:\n\n${brief}\n\nProvide your ${label} analysis.` },
-  ];
+  const body = extraUserPrefix
+    ? `${extraUserPrefix.trim()}\n\n---\n\nRole: ${label.toUpperCase()}\nInvestigation leg: "${angle}"\n\nIntelligence brief:\n\n${brief}\n\nProvide your ${label} analysis.`
+    : `Role: ${label.toUpperCase()}\nInvestigation leg: "${angle}"\n\nIntelligence brief:\n\n${brief}\n\nProvide your ${label} analysis.`;
+  const messages: ChatMessage[] = [...history, { role: "user", content: body }];
   return streamModel(
-    client, MODELS.analyst, messages,
+    client,
+    MODELS.analyst,
+    messages,
     (delta) => sendEvent({ type: "analyst_chunk", instance, content: delta }),
-    ANALYST_PROMPTS[instance], MAX_TOKENS.analyst
+    ANALYST_PROMPTS[instance],
+    MAX_TOKENS.analyst
   );
 }
 
 /**
- * Run researcher then analyst for one lane (0=bull, 1=bear, 2=moderate).
+ * Run researcher then analyst for one lane (0=listings, 1=comps).
  */
 async function runLane(
   angle: string,
   history: ChatMessage[],
   laneIdx: number,
-  sendEvent: (e: SwarmEvent) => void
+  researcherSystemPrompt: string,
+  sendEvent: (e: SwarmEvent) => void,
+  extraUserPrefix?: string
 ): Promise<string> {
-  const brief = await runResearch(angle, history, laneIdx, sendEvent);
-  return runAnalyst(angle, brief, history, laneIdx, sendEvent);
+  const brief = await runResearch(angle, history, laneIdx, researcherSystemPrompt, sendEvent, extraUserPrefix);
+  return runAnalyst(angle, brief, history, laneIdx, sendEvent, extraUserPrefix);
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -168,9 +402,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const sendEvent = (event: SwarmEvent) => {
         try {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
-          );
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {
           // Client disconnected
         }
@@ -179,33 +411,68 @@ export async function POST(req: NextRequest) {
       try {
         const client = createClient();
 
-        // ── Phase 0: Decompose (hardcoded angles — saves ~4s vs LLM call) ───
-        sendEvent({ type: "phase", phase: "decompose", label: "Targeting the three investigation legs…" });
+        sendEvent({
+          type: "phase",
+          phase: "decompose",
+          label: "Pipeline: local listings → sold comps / gaps → ranked opportunities…",
+        });
 
         const userQuery = history.at(-1)?.content ?? "";
+        const historyForSwarm = history.length <= 10 ? history : history.slice(-10);
+        const fetchedEvidence = await getEvidenceForQuery(userQuery);
+        const fetchedEvidenceContext = formatEvidenceContext(fetchedEvidence);
 
-        const angles = [
-          `Supply dynamics — who controls the resource, what are their real incentives, where is the structural inefficiency: ${userQuery}`,
-          `Demand blindspot — who actually wants this and doesn't know where to get it, what false assumption keeps buyer and seller apart: ${userQuery}`,
-          `Timing and catalyst — what recent shift just created this gap and how long before it closes: ${userQuery}`,
+        const angleListings = `Available listings — surface every practical way to find inventory (Marketplace, OfferUp, Craigslist, Nextdoor, etc.) for underpriced, high-velocity items. User focus: ${userQuery}`;
+        const angleComps = `Sold listings & price gaps — compare typical local asks vs sold comps and fees for the hunts in STEP 1. User focus: ${userQuery}`;
+
+        // Step 1: search / hunt map (listings)
+        sendEvent({ type: "phase", phase: "research", label: "Step 1 — Searching available listings (channels, dorks, examples)…" });
+        const analysisScout = await runLane(
+          angleListings,
+          historyForSwarm,
+          0,
+          RESEARCHER_PROMPT_LISTINGS,
+          sendEvent,
+          fetchedEvidenceContext
+        );
+
+        // Step 2: cross-reference sold listings vs Step 1 (sequential so comps can use scout output)
+        const crossRefPrefix = `${fetchedEvidenceContext}\n\n### STEP 1 OUTPUT — LISTINGS SCOUT (cross-reference these hunts against sold listings; quantify price gaps)\n\n${analysisScout}`;
+        sendEvent({
+          type: "phase",
+          phase: "research",
+          label: "Step 2 — Cross-referencing sold listings & price gaps…",
+        });
+        const analysisRoi = await runLane(
+          angleComps,
+          historyForSwarm,
+          1,
+          RESEARCHER_PROMPT_COMPS,
+          sendEvent,
+          crossRefPrefix
+        );
+
+        // Step 3: synthesize ranked opportunity list
+        sendEvent({
+          type: "phase",
+          phase: "synthesis",
+          label: "Step 3 — Ranking opportunities by ROI…",
+        });
+
+        const evidenceText = `${analysisScout}\n${analysisRoi}\n${fetchedEvidence.listings.map((l) => l.url).join("\n")}`;
+        const evidenceUrlList = [
+          ...new Set(fetchedEvidence.listings.map((l) => l.url).filter(isLocalListingEvidenceUrl)),
         ];
-
-        // ── Phase 1+2: Parallel research swarms + analysts ───────────────────
-        sendEvent({ type: "phase", phase: "research", label: "Running three collaborative investigation legs in parallel…" });
-
-        const [analysis0, analysis1, analysis2] = await Promise.all([
-          runLane(angles[0], history, 0, sendEvent),
-          runLane(angles[1], history, 1, sendEvent),
-          runLane(angles[2], history, 2, sendEvent),
-        ]);
-
-        // ── Phase 3: Synthesis ───────────────────────────────────────────────
-        sendEvent({ type: "phase", phase: "synthesis", label: "Connecting all three legs into the single hidden opportunity…" });
+        const evidenceCount = evidenceUrlList.length;
+        const evidenceGateBlock =
+          evidenceCount === 0
+            ? `EVIDENCE GATE: **0** distinct **local marketplace listing** URLs (e.g. Craigslist item, Facebook Marketplace item path, OfferUp /item/…) in STEP 1–2. eBay sold pages do **not** count. Follow STEP 3 "count is 0" instructions — indexing/troubleshooting first, no speculative ranked deals.`
+            : `EVIDENCE GATE: **${evidenceCount}** verified local listing URL(s). Only these may be cited as live listings:\n${evidenceUrlList.map((u) => `- ${u}`).join("\n")}\nDo not invent additional listing URLs.`;
 
         const synthMessages: ChatMessage[] = [
           {
             role: "user",
-            content: `Original query: "${userQuery}"\n\n### Analyst 0 — BULL (argued FOR the opportunity)\n${analysis0}\n\n### Analyst 1 — BEAR (argued AGAINST the opportunity)\n${analysis1}\n\n### Analyst 2 — MODERATOR (found what survives the debate)\n${analysis2}\n\nForge the debate into ONE singular, defensible arbitrage opportunity.`,
+            content: `Original query: "${userQuery}"\n\n${evidenceGateBlock}\n\n${fetchedEvidenceContext}\n\n### STEP 1 — LISTINGS (search + scout)\n${analysisScout}\n\n### STEP 2 — SOLD COMPS & GAPS\n${analysisRoi}\n\nProduce STEP 3 output per system instructions.`,
           },
         ];
 
@@ -219,9 +486,8 @@ export async function POST(req: NextRequest) {
           MAX_TOKENS.synthesis
         );
 
-        // ── Extract metadata ─────────────────────────────────────────────────
         let confidence = 0.75;
-        let edgeTag = "structural";
+        let edgeTag = "velocity";
 
         const trimmed = fullSynthesis.trimEnd();
         const lastNl = trimmed.lastIndexOf("\n");
@@ -240,13 +506,25 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        if (evidenceCount === 0) {
+          confidence = Math.min(confidence, 0.35);
+        }
+
+        const linkGuard = sanitizeSynthesisLinks(fullSynthesis, evidenceText);
+        if (linkGuard.removed > 0) {
+          fullSynthesis = `${linkGuard.text}\n\nNote: removed ${linkGuard.removed} unverified or template-style link(s); only URLs that appeared in STEP 1–2 research are allowed.`;
+        } else if (!/Verified listing links:/i.test(fullSynthesis)) {
+          fullSynthesis = `${fullSynthesis}\n\nVerified listing links: none found in this run.\nLink coverage: No crawlable listing URLs were present in upstream research — common causes include login-gated marketplaces, JS-only results, thin Google indexing for item pages, or queries that need tighter keywords/geo.`;
+        }
+        fullSynthesis = `${fullSynthesis}\n\nEvidence sources used: ${fetchedEvidence.usedSources.join(", ") || "none"}\nListings fetched count: ${fetchedEvidence.listings.length}\nComps fetched count: ${fetchedEvidence.comps?.sampleSoldUrls.length ?? 0}\nSkipped sources: ${fetchedEvidence.skippedSources.join(" | ") || "none"}`;
+
         sendEvent({
           type: "complete",
           message: {
             id: crypto.randomUUID(),
             role: "assistant",
             content: fullSynthesis,
-            analysts: [analysis0, analysis1, analysis2],
+            analysts: [analysisScout, analysisRoi],
             confidence,
             edgeTag,
           },

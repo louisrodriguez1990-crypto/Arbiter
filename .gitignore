@@ -4,8 +4,10 @@ out/
 
 # Node
 node_modules/
+data/
 
 # Env
+.env
 .env.local
 .env*.local
 

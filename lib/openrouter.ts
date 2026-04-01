@@ -1,3 +1,4 @@
+import "@/lib/load-env";
 import OpenAI from "openai";
 
 // ─── Model IDs ────────────────────────────────────────────────────────────────
@@ -14,16 +15,22 @@ export const MODELS = {
 // ─── Token budgets (keep every call short to stay under 25s Edge limit) ──────
 
 export const MAX_TOKENS = {
-  researcher: 250,
-  analyst:    350,
-  synthesis:  550,
+  /** Listings scout prompt is long (dorks + scripts); keep headroom for output. */
+  researcher: 450,
+  analyst:    450,
+  /** Ranked opportunity lists need room */
+  synthesis:  900,
 } as const;
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 export function createClient() {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+  if (!apiKey) {
+    throw new Error(
+      "OPENROUTER_API_KEY is not set. Add it to `.env` or `.env.local` in the project root (same folder as package.json), save the file, then restart npm run dev."
+    );
+  }
 
   return new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
@@ -38,6 +45,10 @@ export function createClient() {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
+type CallModelOptions = {
+  maxTokens?: number;
+  enableWebSearch?: boolean;
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -49,8 +60,10 @@ export async function callModel(
   model: string,
   messages: ChatMessage[],
   systemPrompt?: string,
-  maxTokens?: number
+  options?: number | CallModelOptions
 ): Promise<string> {
+  const normalized: CallModelOptions =
+    typeof options === "number" ? { maxTokens: options } : options ?? {};
   const msgs: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   if (systemPrompt) msgs.push({ role: "system", content: systemPrompt });
   msgs.push(...messages);
@@ -59,7 +72,8 @@ export async function callModel(
     model,
     messages: msgs,
     temperature: 0.7,
-    ...(maxTokens ? { max_tokens: maxTokens } : {}),
+    ...(normalized.maxTokens ? { max_tokens: normalized.maxTokens } : {}),
+    ...(normalized.enableWebSearch ? { plugins: [{ id: "web" }] } : {}),
   });
 
   return response.choices[0]?.message?.content ?? "";

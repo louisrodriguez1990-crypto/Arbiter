@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Arbiter — Reasoning Engine",
-  description: "Find the angle nobody else is looking at.",
+  title: "Arbiter - Opportunity Engine",
+  description: "Manual liquidation ingest, eBay comps, and anomaly scoring for mid-market arbitrage.",
 };
 
 export default function RootLayout({
